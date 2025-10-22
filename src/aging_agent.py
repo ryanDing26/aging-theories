@@ -650,8 +650,8 @@ def main():
     agent = SubmissionAgent()
     agent.run(
         initial_query="aging mechanisms[Title/Abstract]",
-        target_papers=50,
-        max_cost_usd=10.0
+        target_papers=100000,
+        max_cost_usd=1000.00
     )
 
 

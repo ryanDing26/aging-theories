@@ -1,0 +1,63 @@
+==================================
+Job started: Wed Oct 22 13:39:05 PDT 2025
+Job ID: 1220768
+Running on: n004.cluster.pssclabs.com
+==================================
+
+╔══════════════════════════════════════════════════════════════╗
+║   SUBMISSION-FORMAT AGING RESEARCH AGENT                     ║
+╚══════════════════════════════════════════════════════════════╝
+
+Target Papers: 100000
+Budget: $1000.0
+Output Dir: submission_output
+
+Starting...
+
+
+🔍 Searching: 'aging mechanisms[Title/Abstract]'...
+   Found 728 candidates
+
+
+📄 Paper 1/100000
+
+================================================================================
+Processing PMID: 34600936
+Step 1: Fetching metadata...
+  ✓ Brain aging mechanisms with mechanical manifestations....
+
+Step 2: Attempting full text...
+  ✓ Retrieved from pmc
+
+Step 3: Tagging theories...
+  ✓ Found 10 theories:
+    - Free Radical Theory (0.90)
+    - Mitochondrial Dysfunction (0.95)
+    - Cellular Senescence (0.85)
+    - Altered Intercellular Communication (0.90)
+    - Loss of Proteostasis (0.95)
+    - Deregulated Nutrient Sensing (0.75)
+    - Vascular Aging Theory (0.90)
+    - Neuroinflammation Theory (0.90)
+    - Demyelination Theory (0.85)
+    - Synaptic Loss Theory (0.85)
+
+Step 4: Extracting answers...
+  ✓ Q1-Q9 extracted
+
+Overall confidence: HIGH
+⏱ Processing time: 36.86s
+💰 Estimated total cost: $0.04
+
+
+📄 Paper 2/100000
+
+================================================================================
+Processing PMID: 35183431
+Step 1: Fetching metadata...
+  ✓ Targeting aging mechanisms: pharmacological perspectives....
+
+Step 2: Attempting full text...
+  ⚠ Using abstract only
+
+Step 3: Tagging theories...

@@ -1,6 +1,0 @@
-paper_url,theory_id,theory_name,confidence,evidence_snippets,source
-https://pubmed.ncbi.nlm.nih.gov/29178613/,2,Telomere Shortening,0.950,nuclear aging with dysfunctional telomeres | nuclear aging with dysfunctional telomeres and irreversible cell cycle arrest in stem and cancer cells,abstract
-https://pubmed.ncbi.nlm.nih.gov/29178613/,3,Mitochondrial Dysfunction,0.850,cytoplasm aging in association with organelle degeneration in terminally differentiated cells | aging may originate from cytoplasm or the nucleus of a cell with cytoplasm aging in association with organelle degeneration,abstract
-https://pubmed.ncbi.nlm.nih.gov/29178613/,4,Cellular Senescence,0.900,extracellular senescence-associated low-grade inflammation | irreversible cell cycle arrest in stem and cancer cells,abstract
-https://pubmed.ncbi.nlm.nih.gov/29178613/,5,Stem Cell Exhaustion,0.800,nuclear aging with dysfunctional telomeres and irreversible cell cycle arrest in stem and cancer cells | irreversible cell cycle arrest in stem and cancer cells,abstract
-https://pubmed.ncbi.nlm.nih.gov/29178613/,6,Altered Intercellular Communication,0.850,extracellular senescence-associated low-grade inflammation to spread aging | Either cytoplasm aging or nuclear aging may cause extracellular senescence-associated low-grade inflammation to spread aging,abstract
