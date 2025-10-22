@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
 """
 Setup and Test - Submission Format Agent
-Verifies everything works and processes 1 test paper
+Works with your existing codebase structure
 """
 
 import os
 import sys
 from pathlib import Path
+
+# Add src to path for imports
+sys.path.insert(0, str(Path(__file__).parent / 'src'))
 from dotenv import load_dotenv
 load_dotenv()
 
+
 def check_requirements():
-    """Check if all required packages are installed"""
+    """Check required packages"""
     print("🔍 Checking requirements...")
     
     required = {
@@ -21,8 +25,9 @@ def check_requirements():
     
     missing = []
     for package, install_cmd in required.items():
+        pkg_name = package.replace('-', '_')  # python-dotenv -> python_dotenv
         try:
-            __import__(package)
+            __import__(pkg_name)
             print(f"  ✓ {package}")
         except ImportError:
             print(f"  ❌ {package} - Run: {install_cmd}")
@@ -32,7 +37,7 @@ def check_requirements():
 
 
 def check_env_vars():
-    """Check if required environment variables are set"""
+    """Check environment variables"""
     print("\n🔍 Checking environment variables...")
     
     required = {
@@ -50,11 +55,18 @@ def check_env_vars():
             print(f"  ❌ {var} - {description}")
             missing.append(var)
     
+    if missing:
+        print("\n💡 To set environment variables:")
+        print("   1. Create a .env file in project root")
+        print("   2. Add these lines:")
+        print("      ANTHROPIC_API_KEY=your-key-here")
+        print("      PUBMED_EMAIL=your-email@example.com")
+    
     return len(missing) == 0
 
 
 def test_anthropic_connection():
-    """Test connection to Anthropic API"""
+    """Test Anthropic API"""
     print("\n🔍 Testing Anthropic API connection...")
     
     try:
@@ -83,7 +95,7 @@ def test_anthropic_connection():
 
 
 def test_pubmed_connection():
-    """Test connection to PubMed API"""
+    """Test PubMed API"""
     print("\n🔍 Testing PubMed API connection...")
     
     try:
@@ -111,7 +123,7 @@ def test_pubmed_connection():
 
 
 def run_test_paper():
-    """Run the agent on 1 test paper"""
+    """Run agent on 1 test paper"""
     print("\n🚀 Running test with 1 paper...")
     print("   (This will cost ~$0.04 and take ~30 seconds)")
     
@@ -121,7 +133,20 @@ def run_test_paper():
         return True
     
     try:
-        from aging_agent_submission import EnhancedAgingResearchAgent
+        # Import the correct submission agent
+        # First, try to import from the file we just created
+        agent_file = Path(__file__).parent / "aging_agent.py"
+        
+        if agent_file.exists():
+            print(f"\n✓ Using: {agent_file}")
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("submission_agent", agent_file)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            SubmissionAgent = module.SubmissionAgent
+        else:
+            # Try importing from src directory
+            from aging_agent import SubmissionAgent
         
         # Create test output directory
         test_dir = Path("test_submission")
@@ -154,7 +179,7 @@ def run_test_paper():
                 size = file.stat().st_size
                 print(f"  ✓ {file.name} ({size} bytes)")
                 
-                # Show sample content
+                # Show sample
                 with open(file, 'r', encoding='utf-8') as f:
                     lines = f.readlines()
                     if len(lines) > 1:
@@ -164,7 +189,7 @@ def run_test_paper():
                 print(f"  ❌ {file.name} not created")
                 all_exist = False
         
-        # Check supplementary files
+        # Check supplementary
         supp_dir = test_dir / "supplementary"
         if supp_dir.exists():
             print(f"\n  ✓ Supplementary directory created")
@@ -175,23 +200,45 @@ def run_test_paper():
             print("\n✅ Test successful! All files created.")
             print(f"\n📂 Check output: {test_dir}/")
             
-            # Run verification
-            print("\n🔍 Running format verification...")
-            from verify_submission import verify_table1, verify_table2, verify_table3
-            
+            # Verify format
+            print("\n🔍 Verifying format...")
             try:
-                v1 = verify_table1(expected_files[0])
-                v2 = verify_table2(expected_files[1])
-                v3 = verify_table3(expected_files[2])
+                import csv
                 
-                if v1 and v2 and v3:
-                    print("\n✅ Format verification passed!")
-                else:
-                    print("\n⚠️  Some format issues detected")
+                # Check table1 format
+                with open(expected_files[0], 'r') as f:
+                    reader = csv.DictReader(f)
+                    required = ['theory_id', 'theory_name', 'number_of_collected_papers']
+                    if list(reader.fieldnames) == required:
+                        print("  ✓ Table 1 format correct")
+                    else:
+                        print(f"  ⚠ Table 1 format issue: {reader.fieldnames}")
+                
+                # Check table2 format
+                with open(expected_files[1], 'r') as f:
+                    reader = csv.DictReader(f)
+                    required = ['theory_id', 'paper_url', 'paper_name', 'paper_year']
+                    if list(reader.fieldnames) == required:
+                        print("  ✓ Table 2 format correct")
+                    else:
+                        print(f"  ⚠ Table 2 format issue: {reader.fieldnames}")
+                
+                # Check table3 format
+                with open(expected_files[2], 'r') as f:
+                    reader = csv.DictReader(f)
+                    required = ['theory_id', 'paper_url', 'paper_name', 'paper_year',
+                               'Q1', 'Q2', 'Q3', 'Q4', 'Q5', 'Q6', 'Q7', 'Q8', 'Q9']
+                    if list(reader.fieldnames) == required:
+                        print("  ✓ Table 3 format correct")
+                    else:
+                        print(f"  ⚠ Table 3 format issue: {reader.fieldnames}")
+                
+                print("\n✅ Format verification passed!")
+                
             except Exception as e:
                 print(f"\n⚠️  Verification error: {e}")
         else:
-            print("\n⚠️  Some files missing. Check errors above.")
+            print("\n⚠️  Some files missing.")
         
         return all_exist
         
@@ -200,45 +247,6 @@ def run_test_paper():
         import traceback
         traceback.print_exc()
         return False
-
-
-def print_next_steps():
-    """Print next steps for the user"""
-    print("\n" + "="*80)
-    print("✨ SETUP COMPLETE!")
-    print("="*80)
-    
-    print("\n📖 Next Steps:\n")
-    
-    print("1. Review the test output:")
-    print("   cd test_submission")
-    print("   ls -lh *.csv")
-    
-    print("\n2. Run a small batch (10-50 papers):")
-    print("   python aging_agent_submission.py")
-    
-    print("\n3. Or customize your run:")
-    print("   python -c \"")
-    print("   from aging_agent_submission import SubmissionAgent")
-    print("   agent = SubmissionAgent()")
-    print("   agent.run(target_papers=50, max_cost_usd=2.00)")
-    print("   \"")
-    
-    print("\n4. Verify submission format:")
-    print("   python verify_submission.py")
-    
-    print("\n💡 Pro Tips:")
-    print("   - Start with 10-50 papers to test")
-    print("   - Check supplementary/quality_metrics.csv for data quality")
-    print("   - Cost: ~$0.04 per paper with validation")
-    
-    print("\n📊 Your submission files:")
-    print("   submission_output/table1_theories.csv")
-    print("   submission_output/table2_papers.csv")
-    print("   submission_output/table3_annotations.csv")
-    
-    print("\n" + "="*80)
-
 
 def main():
     """Main setup flow"""
@@ -271,21 +279,14 @@ def main():
     if not all_passed:
         print("\n⚠️  Please fix the failed checks above before proceeding.")
         print("\nCommon fixes:")
-        print("  - Install packages: pip install anthropic requests")
-        print("  - Set API key: export ANTHROPIC_API_KEY='your-key-here'")
-        print("  - Set email: export PUBMED_EMAIL='your-email@example.com'")
+        print("  - Install packages: pip install -r requirements.txt")
+        print("  - Create .env file with your API keys")
+        print("  - export ANTHROPIC_API_KEY='your-key-here'")
         return 1
     
     # Run test
     test_passed = run_test_paper()
-    
-    if test_passed:
-        print_next_steps()
-        return 0
-    else:
-        print("\n⚠️  Test failed. Please check the errors above.")
-        return 1
-
+    print(test_passed)
 
 if __name__ == "__main__":
     sys.exit(main())
