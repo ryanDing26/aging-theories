@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Setup and Test - Submission Format Agent
+Setup and Test - MedRxiv Agent
 Works with your existing codebase structure
 """
 
@@ -25,7 +25,7 @@ def check_requirements():
     
     missing = []
     for package, install_cmd in required.items():
-        pkg_name = package.replace('-', '_')  # python-dotenv -> python_dotenv
+        pkg_name = package.replace('-', '_')
         try:
             __import__(pkg_name)
             print(f"  ✓ {package}")
@@ -42,7 +42,6 @@ def check_env_vars():
     
     required = {
         'ANTHROPIC_API_KEY': 'Your Claude API key',
-        'PUBMED_EMAIL': 'Your email for PubMed API'
     }
     
     missing = []
@@ -60,7 +59,6 @@ def check_env_vars():
         print("   1. Create a .env file in project root")
         print("   2. Add these lines:")
         print("      ANTHROPIC_API_KEY=your-key-here")
-        print("      PUBMED_EMAIL=your-email@example.com")
     
     return len(missing) == 0
 
@@ -94,27 +92,28 @@ def test_anthropic_connection():
         return False
 
 
-def test_pubmed_connection():
-    """Test PubMed API"""
-    print("\n🔍 Testing PubMed API connection...")
+def test_medrxiv_connection():
+    """Test MedRxiv API"""
+    print("\n🔍 Testing MedRxiv API connection...")
     
     try:
         import requests
+        from datetime import datetime, timedelta
         
-        url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
-        params = {
-            'db': 'pubmed',
-            'term': 'aging',
-            'retmax': 1,
-            'retmode': 'json'
-        }
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=30)
         
-        response = requests.get(url, params=params, timeout=10)
+        start_str = start_date.strftime("%Y-%m-%d")
+        end_str = end_date.strftime("%Y-%m-%d")
+        
+        url = f"http://api.medrxiv.org/details/medrxiv/{start_str}/{end_str}/0/json"
+        
+        response = requests.get(url, timeout=10)
         response.raise_for_status()
         data = response.json()
         
-        count = data.get('esearchresult', {}).get('count', 0)
-        print(f"  ✓ PubMed accessible ({count} papers on 'aging')")
+        count = len(data.get('collection', []))
+        print(f"  ✓ MedRxiv accessible ({count} papers in last 30 days)")
         return True
         
     except Exception as e:
@@ -133,9 +132,7 @@ def run_test_paper():
         return True
     
     try:
-        # Import the correct submission agent
-        # First, try to import from the file we just created
-        agent_file = Path(__file__).parent / "aging_agent.py"
+        agent_file = Path(__file__).parent / "aging_agent_medrxiv.py"
         
         if agent_file.exists():
             print(f"\n✓ Using: {agent_file}")
@@ -145,11 +142,11 @@ def run_test_paper():
             spec.loader.exec_module(module)
             SubmissionAgent = module.SubmissionAgent
         else:
-            # Try importing from src directory
-            from aging_agent_pubmed import SubmissionAgent
+            print(f"  ❌ File not found: {agent_file}")
+            return False
         
         # Create test output directory
-        test_dir = Path("test_submission")
+        test_dir = Path("test_medrxiv")
         test_dir.mkdir(exist_ok=True)
         
         # Initialize agent
@@ -159,7 +156,7 @@ def run_test_paper():
         # Run with 1 paper
         print("\n" + "="*80)
         agent.run(
-            initial_query="aging mechanisms[Title/Abstract] AND mitochondria",
+            initial_query="aging",
             target_papers=1,
             max_cost_usd=0.50
         )
@@ -252,7 +249,7 @@ def main():
     """Main setup flow"""
     print("""
 ╔══════════════════════════════════════════════════════════════╗
-║   SETUP & TEST - Submission Format Agent                    ║
+║   SETUP & TEST - MedRxiv Agent                              ║
 ╚══════════════════════════════════════════════════════════════╝
 """)
     
@@ -261,7 +258,7 @@ def main():
         "Requirements": check_requirements(),
         "Environment": check_env_vars(),
         "Anthropic API": test_anthropic_connection(),
-        "PubMed API": test_pubmed_connection(),
+        "MedRxiv API": test_medrxiv_connection(),
     }
     
     # Summary

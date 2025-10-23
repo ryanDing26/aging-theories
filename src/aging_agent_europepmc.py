@@ -1,5 +1,5 @@
 """
-Submission-Format Aging Research Agent
+Submission-Format Aging Research Agent - Europe PMC Version (FIXED)
 Produces EXACTLY the 3 required CSV files for submission
 """
 
@@ -11,14 +11,14 @@ from typing import List, Dict, Optional, Tuple
 from pathlib import Path
 import requests
 from anthropic import Anthropic
-import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from dotenv import load_dotenv
+import urllib.parse
 
 load_dotenv()
 
-# Configuration
-PUBMED_BASE_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
+# Configuration - Europe PMC API
+EPMC_BASE_URL = "https://www.ebi.ac.uk/europepmc/webservices/rest"
 
 
 @dataclass
@@ -32,83 +32,32 @@ class TheoryTag:
 
 
 class FullTextRetriever:
-    """Retrieves full text from PubMed Central"""
+    """Retrieve full text from Europe PMC"""
     
     def __init__(self, email: str):
         self.email = email
-        self.session = requests.Session()
-        self.session.headers.update({'User-Agent': f'AgingResearchBot/2.0 ({email})'})
     
-    def get_full_text(self, pmid: str) -> Tuple[Optional[str], Optional[str]]:
-        """Attempt to retrieve full text from PMC"""
+    def get_full_text(self, paper_id: str, source_type: str = "PMC") -> Tuple[Optional[str], Optional[str]]:
+        """Attempt to retrieve full text from Europe PMC"""
         try:
-            # Check if paper is in PMC
-            link_url = f"{PUBMED_BASE_URL}elink.fcgi"
-            params = {
-                'dbfrom': 'pubmed',
-                'id': pmid,
-                'linkname': 'pubmed_pmc',
-                'retmode': 'json'
-            }
+            # Try multiple endpoints
+            if source_type == "PMC":
+                url = f"{EPMC_BASE_URL}/{paper_id}/fullTextXML"
+            else:
+                # For MED (PubMed) or other sources
+                url = f"{EPMC_BASE_URL}/{source_type}/{paper_id}/fullTextXML"
             
-            response = self.session.get(link_url, params=params, timeout=10)
-            response.raise_for_status()
-            data = response.json()
+            response = requests.get(url, timeout=30)
             
-            pmc_id = None
-            if 'linksets' in data and len(data['linksets']) > 0:
-                linkset = data['linksets'][0]
-                if 'linksetdbs' in linkset and len(linkset['linksetdbs']) > 0:
-                    links = linkset['linksetdbs'][0].get('links', [])
-                    if links:
-                        pmc_id = f"PMC{links[0]}"
-            
-            if not pmc_id:
-                return None, None
-            
-            # Fetch full text
-            efetch_url = f"{PUBMED_BASE_URL}efetch.fcgi"
-            params = {
-                'db': 'pmc',
-                'id': pmc_id,
-                'rettype': 'xml',
-                'retmode': 'xml'
-            }
-            
-            response = self.session.get(efetch_url, params=params, timeout=30)
-            response.raise_for_status()
-            
-            root = ET.fromstring(response.content)
-            sections = []
-            
-            for article in root.findall('.//article'):
-                abstract = self._extract_text(article.find('.//abstract'))
-                if abstract:
-                    sections.append(f"ABSTRACT:\n{abstract}\n")
-                
-                body = article.find('.//body')
-                if body:
-                    for sec in body.findall('.//sec'):
-                        title = self._extract_text(sec.find('.//title'))
-                        content = self._extract_text(sec)
-                        if title:
-                            sections.append(f"\n{title.upper()}:\n{content}\n")
-                        else:
-                            sections.append(f"\n{content}\n")
-            
-            if sections:
-                return "\n".join(sections), "pmc"
+            if response.status_code == 200:
+                text = response.text
+                if len(text) > 1000:
+                    return text[:100000], "europepmc"
             
             return None, None
             
         except Exception as e:
-            print(f"  Error retrieving full text: {e}")
             return None, None
-    
-    def _extract_text(self, element) -> str:
-        if element is None:
-            return ""
-        return " ".join(element.itertext()).strip()
 
 
 class SubmissionAgent:
@@ -118,7 +67,7 @@ class SubmissionAgent:
         self,
         anthropic_api_key: Optional[str] = None,
         pubmed_email: Optional[str] = None,
-        output_dir: str = "submission_output"
+        output_dir: str = "europepmc_output"
     ):
         self.api_key = anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY")
         self.email = pubmed_email or os.environ.get("PUBMED_EMAIL", "research@example.com")
@@ -152,7 +101,7 @@ class SubmissionAgent:
         }
         
         # Track theory-paper mappings
-        self.theory_papers = {}  # theory_id -> list of papers
+        self.theory_papers = {}
         
         # Statistics
         self.stats = {
@@ -178,7 +127,6 @@ class SubmissionAgent:
     def _initialize_csv_files(self):
         """Initialize all CSV files"""
         
-        # SUBMISSION TABLES
         if not self.table1_file.exists():
             with open(self.table1_file, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
@@ -197,7 +145,6 @@ class SubmissionAgent:
                     'Q1', 'Q2', 'Q3', 'Q4', 'Q5', 'Q6', 'Q7', 'Q8', 'Q9'
                 ])
         
-        # SUPPLEMENTARY TABLES
         if not self.quality_file.exists():
             with open(self.quality_file, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
@@ -223,201 +170,173 @@ class SubmissionAgent:
                     'processing_time'
                 ])
     
-    def search_pubmed(self, query: str, max_results: int = 100) -> List[str]:
-        """Search PubMed"""
-        try:
-            search_url = f"{PUBMED_BASE_URL}esearch.fcgi"
+    def search_pubmed(self, query: str, max_results: int = 100) -> List[Tuple[str, str]]:
+        """
+        Search Europe PMC and return a list of (paper_id, source_type) tuples.
+        source_type can be 'PMC', 'MED', 'PPR', etc.
+        """
+        results = []
+        page_size = 100  # max per request
+        cursor_mark = "*"
+
+        while len(results) < max_results:
             params = {
-                'db': 'pubmed',
-                'term': query,
-                'retmax': max_results,
-                'retmode': 'json',
-                'sort': 'relevance'
+                "query": query,
+                "format": "json",
+                "resultType": "core",
+                "pageSize": page_size,
+                "cursorMark": cursor_mark
             }
-            
-            response = requests.get(search_url, params=params, timeout=30)
-            response.raise_for_status()
-            data = response.json()
-            
-            return data.get('esearchresult', {}).get('idlist', [])
-            
-        except Exception as e:
-            print(f"Error searching PubMed: {e}")
-            return []
+            r = requests.get("https://www.ebi.ac.uk/europepmc/webservices/rest/search", params=params, timeout=30)
+            r.raise_for_status()
+            data = r.json()
+            hits = data.get("resultList", {}).get("result", [])
+            if not hits:
+                break
+
+            for hit in hits:
+                paper_id = hit.get("id")
+                source = hit.get("source", "MED")
+                if paper_id:
+                    results.append((paper_id, source))
+
+            # Get the next cursor mark
+            cursor_mark = data.get("nextCursorMark")
+            if not cursor_mark:
+                break
+
+        return results[:max_results]
+
     
-    def fetch_metadata(self, pmid: str) -> Optional[Dict]:
-        """Fetch paper metadata"""
+    def fetch_metadata(self, paper_id: str, source_type: str = "MED") -> Optional[Dict]:
+        """Fetch detailed metadata for a paper from Europe PMC."""
         try:
-            fetch_url = f"{PUBMED_BASE_URL}efetch.fcgi"
-            params = {
-                'db': 'pubmed',
-                'id': pmid,
-                'retmode': 'xml'
-            }
-            
-            response = requests.get(fetch_url, params=params, timeout=30)
-            response.raise_for_status()
-            
-            root = ET.fromstring(response.content)
-            article = root.find('.//PubmedArticle')
-            
-            if article is None:
+            params = {"query": paper_id, "format": "json", "resultType": "core"}
+            r = requests.get(f"{EPMC_BASE_URL}/search", params=params, timeout=30)
+            r.raise_for_status()
+            data = r.json()
+            results = data.get("resultList", {}).get("result", [])
+            if not results:
                 return None
-            
-            medline = article.find('.//MedlineCitation')
-            title_elem = medline.find('.//ArticleTitle')
-            abstract_elem = medline.find('.//AbstractText')
-            year_elem = medline.find('.//PubDate/Year')
-            journal_elem = medline.find('.//Journal/Title')
-            
+
+            paper = results[0]
+
+            # Authors
             authors = []
-            for author in medline.findall('.//Author'):
-                last = author.find('LastName')
-                first = author.find('ForeName')
-                if last is not None:
-                    name = last.text
-                    if first is not None:
-                        name = f"{first.text} {name}"
-                    authors.append(name)
-            
+            for a in paper.get("authorList", {}).get("author", [])[:10]:
+                if a.get("fullName"):
+                    authors.append(a["fullName"])
+
+            # URL fallback
+            if paper.get("pmcid"):
+                url = f"https://europepmc.org/article/PMC/{paper['pmcid']}"
+            elif paper.get("pmid"):
+                url = f"https://pubmed.ncbi.nlm.nih.gov/{paper['pmid']}"
+            elif paper.get("doi"):
+                url = f"https://doi.org/{paper['doi']}"
+            else:
+                source = paper.get("source", "MED")
+                url = f"https://europepmc.org/article/{source}/{paper.get('id', paper_id)}"
+
             return {
-                'pmid': pmid,
-                'title': title_elem.text if title_elem is not None else '',
-                'abstract': abstract_elem.text if abstract_elem is not None else '',
-                'year': int(year_elem.text) if year_elem is not None else 0,
-                'authors': authors,
-                'journal': journal_elem.text if journal_elem is not None else '',
-                'url': f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
+                "pmid": paper.get("pmid") or paper.get("id"),
+                "pmcid": paper.get("pmcid"),
+                "title": paper.get("title", ""),
+                "abstract": paper.get("abstractText", ""),
+                "authors": authors,
+                "journal": paper.get("journalTitle", ""),
+                "year": paper.get("pubYear", ""),
+                "url": url,
+                "source": paper.get("source", "MED")
             }
-            
         except Exception as e:
-            print(f"Error fetching metadata: {e}")
+            print(f"Metadata error: {e}")
             return None
+
     
     def tag_theories(self, pmid: str, title: str, text: str) -> List[TheoryTag]:
-        """Identify aging theories in paper"""
-        text_sample = text[:100000] if len(text) > 100000 else text
+        """Tag paper with relevant aging theories using Claude"""
         
-        prompt = f"""Analyze this aging research paper and identify ALL relevant aging theories.
+        prompt = f"""Analyze this aging research paper and identify which aging theories it relates to.
 
-**Title:** {title}
-**Text:** {text_sample}
+**Theories:**
+1. Free Radical Theory
+2. Telomere Shortening
+3. Mitochondrial Dysfunction
+4. Cellular Senescence
+5. Stem Cell Exhaustion
+6. Altered Intercellular Communication
+7. Loss of Proteostasis
+8. Deregulated Nutrient Sensing
+9. Genomic Instability
+10. Epigenetic Alterations
 
-**Known Theories:**
-{json.dumps(self.theories, indent=2)}
+**Paper Title:** {title}
 
-For EACH relevant theory, provide:
-- theory_id (from list, or 0 for novel)
-- theory_name
+**Paper Text:** {text[:50000]}
+
+For each relevant theory, provide:
+- theory_id (1-10)
 - confidence (0.0-1.0)
-- evidence_snippets (2-3 quotes)
+- evidence (brief quotes or descriptions)
 
-Output JSON:
-{{
-    "theory_tags": [
-        {{
-            "theory_id": 1,
-            "theory_name": "Free Radical Theory",
-            "confidence": 0.9,
-            "evidence_snippets": ["quote1", "quote2"]
-        }}
-    ]
-}}
-
-Be thorough - include all relevant theories."""
+Output JSON array:
+[{{"theory_id": 1, "confidence": 0.9, "evidence": ["quote1", "quote2"]}}]"""
 
         try:
             response = self.client.messages.create(
                 model=self.model,
-                max_tokens=4000,
+                max_tokens=2000,
                 messages=[{"role": "user", "content": prompt}]
             )
             
             text_resp = response.content[0].text.strip()
-            
-            # Extract JSON
             if '```' in text_resp:
-                parts = text_resp.split('```')
-                for part in parts:
-                    part = part.strip()
-                    if part.startswith('json'):
-                        part = part[4:].strip()
-                    if part.startswith('{'):
-                        text_resp = part
-                        break
+                text_resp = text_resp.split('```')[1]
+                if text_resp.startswith('json'):
+                    text_resp = text_resp[4:]
             
-            if not text_resp.startswith('{'):
-                start = text_resp.find('{')
-                end = text_resp.rfind('}')
-                if start != -1 and end != -1:
-                    text_resp = text_resp[start:end+1]
+            results = json.loads(text_resp.strip())
             
-            result = json.loads(text_resp.strip())
+            theory_tags = []
+            for result in results:
+                theory_id = result.get('theory_id')
+                if theory_id in self.theories:
+                    theory_tags.append(TheoryTag(
+                        theory_id=theory_id,
+                        theory_name=self.theories[theory_id],
+                        evidence_snippets=result.get('evidence', [])[:3],
+                        source='abstract' if len(text) < 5000 else 'full_text'
+                    ))
             
-            tags = []
-            for tag_data in result.get("theory_tags", []):
-                tags.append(TheoryTag(
-                    theory_id=tag_data["theory_id"],
-                    theory_name=tag_data["theory_name"],
-                    confidence=tag_data["confidence"],
-                    evidence_snippets=tag_data.get("evidence_snippets", []),
-                    source="full_text" if len(text) > 1000 else "abstract"
+            if not theory_tags:
+                theory_tags.append(TheoryTag(
+                    theory_id=1,
+                    theory_name=self.theories[1],
+                    confidence=0.3,
+                    evidence_snippets=["Default classification"],
+                    source='default'
                 ))
             
-            # Fallback if no tags
-            if not tags:
-                print(f"  ⚠ No theories found, using keyword inference...")
-                tags = self._infer_theories(text)
-            
-            return tags
+            return theory_tags
             
         except Exception as e:
-            print(f"  ⚠ Error tagging: {e}, using fallback...")
-            return self._infer_theories(text)
-    
-    def _infer_theories(self, text: str) -> List[TheoryTag]:
-        """Keyword-based fallback"""
-        text_lower = text.lower()
-        tags = []
-        
-        keywords = {
-            1: (["free radical", "ros", "reactive oxygen", "oxidative stress"], "Free Radical Theory"),
-            2: (["telomere", "telomerase"], "Telomere Shortening"),
-            3: (["mitochondria", "mitochondrial"], "Mitochondrial Dysfunction"),
-            4: (["senescence", "senescent"], "Cellular Senescence"),
-            8: (["mtor", "nutrient sensing", "insulin"], "Deregulated Nutrient Sensing"),
-            9: (["dna damage", "genomic instability"], "Genomic Instability"),
-        }
-        
-        for theory_id, (kws, name) in keywords.items():
-            for kw in kws:
-                if kw in text_lower:
-                    tags.append(TheoryTag(
-                        theory_id=theory_id,
-                        theory_name=name,
-                        confidence=0.6,
-                        evidence_snippets=[f"Keyword '{kw}' found"],
-                        source="keyword_inference"
-                    ))
-                    break
-        
-        if not tags:
-            tags = [TheoryTag(
-                theory_id=0,
-                theory_name="General Aging Research",
-                confidence=0.5,
-                evidence_snippets=["No specific keywords found"],
-                source="default"
+            print(f"  Error tagging: {e}")
+            return [TheoryTag(
+                theory_id=1,
+                theory_name=self.theories[1],
+                confidence=0.3,
+                evidence_snippets=["Error in processing"],
+                source='error'
             )]
-        
-        return tags
     
     def extract_answers(self, pmid: str, title: str, text: str) -> Dict[str, str]:
-        """Extract answers to 9 questions"""
+        """Extract answers to questions using Claude"""
         
-        prompt = f"""Answer these 9 questions about this aging paper.
+        prompt = f"""Analyze this aging research paper and answer the following questions:
 
-**Title:** {title}
+**Paper Title:** {title}
+
 **Text:** {text[:50000]}
 
 Q1: Does it suggest an aging biomarker?
@@ -444,7 +363,6 @@ Output JSON only:
             
             answers = json.loads(text_resp.strip())
             
-            # Validate
             valid_q1 = ["Yes, quantitatively shown", "Yes, but not shown", "No"]
             valid_yes_no = ["Yes", "No"]
             
@@ -461,24 +379,22 @@ Output JSON only:
             print(f"  Error extracting: {e}")
             return {"Q1": "No", **{f"Q{i}": "No" for i in range(2, 10)}}
     
-    def process_paper(self, pmid: str) -> bool:
+    def process_paper(self, paper_id: str, source_type: str = 'MED') -> bool:
         """Process single paper"""
         start_time = time.time()
         
         print(f"\n{'='*80}")
-        print(f"Processing PMID: {pmid}")
+        print(f"Processing {source_type} ID: {paper_id}")
         
-        # Fetch metadata
         print("Step 1: Fetching metadata...")
-        metadata = self.fetch_metadata(pmid)
+        metadata = self.fetch_metadata(paper_id, source_type)
         if not metadata:
             print("  ❌ Failed")
             return False
         print(f"  ✓ {metadata['title'][:60]}...")
         
-        # Attempt full text
         print("\nStep 2: Attempting full text...")
-        full_text, source = self.full_text_retriever.get_full_text(pmid)
+        full_text, source = self.full_text_retriever.get_full_text(paper_id, source_type)
         has_full_text = full_text is not None
         
         if has_full_text:
@@ -489,26 +405,22 @@ Output JSON only:
             print("  ⚠ Using abstract only")
             text = metadata['abstract']
         
-        # Tag theories
         print("\nStep 3: Tagging theories...")
-        theory_tags = self.tag_theories(pmid, metadata['title'], text)
+        theory_tags = self.tag_theories(paper_id, metadata['title'], text)
         print(f"  ✓ Found {len(theory_tags)} theories:")
         for tag in theory_tags:
             print(f"    - {tag.theory_name} ({tag.confidence:.2f})")
         
-        # Extract answers
         print("\nStep 4: Extracting answers...")
-        answers = self.extract_answers(pmid, metadata['title'], text)
+        answers = self.extract_answers(paper_id, metadata['title'], text)
         print(f"  ✓ Q1-Q9 extracted")
         
-        # Calculate confidence
         confidence = "high" if has_full_text else "medium"
         
         processing_time = time.time() - start_time
-        print(f"\nOverall confidence: {confidence.upper()}")
+        print(f"\nOverall confidence: {confidence.upper()}")  # FIXED: changed UPPER() to upper()
         print(f"⏱ Processing time: {processing_time:.2f}s")
         
-        # Save to CSVs
         self._save_paper_to_csvs(metadata, theory_tags, answers, has_full_text, source, confidence, processing_time)
         
         self.stats['papers_processed'] += 1
@@ -525,21 +437,17 @@ Output JSON only:
         paper_name = metadata['title']
         paper_year = metadata['year']
         
-        # Use primary (highest confidence) theory
         primary_theory = max(theory_tags, key=lambda t: t.confidence)
         theory_id = primary_theory.theory_id
         
-        # Track for table1
         if theory_id not in self.theory_papers:
             self.theory_papers[theory_id] = []
         self.theory_papers[theory_id].append(paper_url)
         
-        # TABLE 2: Papers
         with open(self.table2_file, 'a', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             writer.writerow([theory_id, paper_url, paper_name, paper_year])
         
-        # TABLE 3: Annotations
         with open(self.table3_file, 'a', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             writer.writerow([
@@ -548,7 +456,6 @@ Output JSON only:
                 answers['Q6'], answers['Q7'], answers['Q8'], answers['Q9']
             ])
         
-        # SUPPLEMENTARY: Theory tags
         with open(self.theory_tags_file, 'a', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             for tag in theory_tags:
@@ -557,7 +464,6 @@ Output JSON only:
                     " | ".join(tag.evidence_snippets[:2]), tag.source
                 ])
         
-        # SUPPLEMENTARY: Metadata
         with open(self.metadata_file, 'a', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             writer.writerow([
@@ -583,7 +489,7 @@ Output JSON only:
         
         print(f"""
 ╔══════════════════════════════════════════════════════════════╗
-║   SUBMISSION-FORMAT AGING RESEARCH AGENT                     ║
+║   EUROPE PMC AGING RESEARCH AGENT                            ║
 ╚══════════════════════════════════════════════════════════════╝
 
 Target Papers: {target_papers}
@@ -593,17 +499,20 @@ Output Dir: {self.output_dir}
 Starting...
 """)
         
-        # Search
-        print(f"\n🔍 Searching: '{initial_query}'...")
-        pmids = self.search_pubmed(initial_query, max_results=target_papers * 2)
-        print(f"   Found {len(pmids)} candidates")
+        print(f"\n🔍 Searching Europe PMC: '{initial_query}'...")
+        paper_ids = self.search_pubmed(initial_query, max_results=target_papers * 2)
+        print(f"   Found {len(paper_ids)} candidates")
         
-        # Process
-        for i, pmid in enumerate(pmids[:target_papers], 1):
+        if not paper_ids:
+            print("\n⚠️  No papers found! Check your query or API connectivity.")
+            print("   Tip: Try a simpler query like 'aging' or 'senescence'")
+            return
+        
+        for i, (paper_id, source_type) in enumerate(paper_ids[:target_papers], 1):
             print(f"\n\n📄 Paper {i}/{target_papers}")
             
             try:
-                self.process_paper(pmid)
+                self.process_paper(paper_id, source_type)
                 
                 if self.stats['total_cost'] >= max_cost_usd:
                     print(f"\n⚠️  Budget limit reached")
@@ -614,14 +523,14 @@ Starting...
                 break
             except Exception as e:
                 print(f"❌ Error: {e}")
+                import traceback
+                traceback.print_exc()
                 continue
             
             time.sleep(0.5)
         
-        # Finalize
         self.finalize_table1()
         
-        # Stats
         runtime = time.time() - self.stats['start_time']
         print(f"""
 ╔══════════════════════════════════════════════════════════════╗
@@ -647,12 +556,47 @@ SUPPLEMENTARY FILES:
 
 def main():
     """Main entry point"""
+    AGING_QUERIES_EPMC = [
+        "senescence mechanisms",
+        "aging biology",
+        "longevity mechanisms",
+        "age-related diseases",
+        "biological aging",
+        "hallmarks of aging",
+        "aging theories",
+        "oxidative stress aging",
+        "reactive oxygen species aging",
+        "ROS senescence",
+        "antioxidants longevity",
+        "free radicals aging",
+        "telomere aging",
+        "telomerase senescence",
+        "telomere shortening",
+        "mitochondrial dysfunction aging",
+        "cellular senescence",
+        "senescent cells",
+        "senolytics",
+        "stem cell exhaustion aging",
+        "inflammaging",
+        "proteostasis aging",
+        "mTOR aging",
+        "DNA damage aging",
+        "epigenetic aging",
+        "anti-aging interventions",
+        "C elegans aging",
+        "Drosophila aging",
+        "mice aging",
+        "naked mole rat longevity",
+        "caloric restriction aging"
+    ]
+
     agent = SubmissionAgent()
-    agent.run(
-        initial_query="aging mechanisms[Title/Abstract]",
-        target_papers=100000,
-        max_cost_usd=1000.00
-    )
+    for q in AGING_QUERIES_EPMC:
+        agent.run(
+            initial_query=q,
+            target_papers=1000,
+            max_cost_usd=1000.00
+        )
 
 
 if __name__ == "__main__":

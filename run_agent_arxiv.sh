@@ -21,7 +21,7 @@ echo "Running on: $(hostname)"
 echo "=================================="
 
 # Run the agent
-python -u src/aging_agent.py
+python -u src/aging_agent_arxiv.py
 
 # Print completion info
 echo "=================================="

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Setup and Test - Submission Format Agent
+Setup and Test - arXiv Agent
 Works with your existing codebase structure
 """
 
@@ -25,7 +25,7 @@ def check_requirements():
     
     missing = []
     for package, install_cmd in required.items():
-        pkg_name = package.replace('-', '_')  # python-dotenv -> python_dotenv
+        pkg_name = package.replace('-', '_')
         try:
             __import__(pkg_name)
             print(f"  ✓ {package}")
@@ -42,7 +42,6 @@ def check_env_vars():
     
     required = {
         'ANTHROPIC_API_KEY': 'Your Claude API key',
-        'PUBMED_EMAIL': 'Your email for PubMed API'
     }
     
     missing = []
@@ -60,7 +59,6 @@ def check_env_vars():
         print("   1. Create a .env file in project root")
         print("   2. Add these lines:")
         print("      ANTHROPIC_API_KEY=your-key-here")
-        print("      PUBMED_EMAIL=your-email@example.com")
     
     return len(missing) == 0
 
@@ -94,27 +92,29 @@ def test_anthropic_connection():
         return False
 
 
-def test_pubmed_connection():
-    """Test PubMed API"""
-    print("\n🔍 Testing PubMed API connection...")
+def test_arxiv_connection():
+    """Test arXiv API"""
+    print("\n🔍 Testing arXiv API connection...")
     
     try:
         import requests
         
-        url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
+        url = "http://export.arxiv.org/api/query"
         params = {
-            'db': 'pubmed',
-            'term': 'aging',
-            'retmax': 1,
-            'retmode': 'json'
+            'search_query': 'all:aging',
+            'start': 0,
+            'max_results': 1
         }
         
         response = requests.get(url, params=params, timeout=10)
         response.raise_for_status()
-        data = response.json()
         
-        count = data.get('esearchresult', {}).get('count', 0)
-        print(f"  ✓ PubMed accessible ({count} papers on 'aging')")
+        import xml.etree.ElementTree as ET
+        root = ET.fromstring(response.content)
+        ns = {'atom': 'http://www.w3.org/2005/Atom'}
+        entries = root.findall('atom:entry', ns)
+        
+        print(f"  ✓ arXiv accessible ({len(entries)} papers found)")
         return True
         
     except Exception as e:
@@ -133,9 +133,7 @@ def run_test_paper():
         return True
     
     try:
-        # Import the correct submission agent
-        # First, try to import from the file we just created
-        agent_file = Path(__file__).parent / "aging_agent.py"
+        agent_file = Path(__file__).parent / "aging_agent_arxiv.py"
         
         if agent_file.exists():
             print(f"\n✓ Using: {agent_file}")
@@ -145,11 +143,11 @@ def run_test_paper():
             spec.loader.exec_module(module)
             SubmissionAgent = module.SubmissionAgent
         else:
-            # Try importing from src directory
-            from aging_agent_pubmed import SubmissionAgent
+            print(f"  ❌ File not found: {agent_file}")
+            return False
         
         # Create test output directory
-        test_dir = Path("test_submission")
+        test_dir = Path("test_arxiv")
         test_dir.mkdir(exist_ok=True)
         
         # Initialize agent
@@ -159,7 +157,7 @@ def run_test_paper():
         # Run with 1 paper
         print("\n" + "="*80)
         agent.run(
-            initial_query="aging mechanisms[Title/Abstract] AND mitochondria",
+            initial_query="aging",
             target_papers=1,
             max_cost_usd=0.50
         )
@@ -252,7 +250,7 @@ def main():
     """Main setup flow"""
     print("""
 ╔══════════════════════════════════════════════════════════════╗
-║   SETUP & TEST - Submission Format Agent                    ║
+║   SETUP & TEST - arXiv Agent                                ║
 ╚══════════════════════════════════════════════════════════════╝
 """)
     
@@ -261,7 +259,7 @@ def main():
         "Requirements": check_requirements(),
         "Environment": check_env_vars(),
         "Anthropic API": test_anthropic_connection(),
-        "PubMed API": test_pubmed_connection(),
+        "arXiv API": test_arxiv_connection(),
     }
     
     # Summary

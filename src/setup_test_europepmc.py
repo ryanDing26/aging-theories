@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Setup and Test - Submission Format Agent
+Setup and Test - Europe PMC Agent
 Works with your existing codebase structure
 """
 
@@ -25,7 +25,7 @@ def check_requirements():
     
     missing = []
     for package, install_cmd in required.items():
-        pkg_name = package.replace('-', '_')  # python-dotenv -> python_dotenv
+        pkg_name = package.replace('-', '_')
         try:
             __import__(pkg_name)
             print(f"  ✓ {package}")
@@ -42,7 +42,6 @@ def check_env_vars():
     
     required = {
         'ANTHROPIC_API_KEY': 'Your Claude API key',
-        'PUBMED_EMAIL': 'Your email for PubMed API'
     }
     
     missing = []
@@ -60,7 +59,6 @@ def check_env_vars():
         print("   1. Create a .env file in project root")
         print("   2. Add these lines:")
         print("      ANTHROPIC_API_KEY=your-key-here")
-        print("      PUBMED_EMAIL=your-email@example.com")
     
     return len(missing) == 0
 
@@ -94,27 +92,27 @@ def test_anthropic_connection():
         return False
 
 
-def test_pubmed_connection():
-    """Test PubMed API"""
-    print("\n🔍 Testing PubMed API connection...")
+def test_europepmc_connection():
+    """Test Europe PMC API"""
+    print("\n🔍 Testing Europe PMC API connection...")
     
     try:
         import requests
         
-        url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
+        url = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
         params = {
-            'db': 'pubmed',
-            'term': 'aging',
-            'retmax': 1,
-            'retmode': 'json'
+            'query': 'aging',
+            'resultType': 'core',
+            'pageSize': 1,
+            'format': 'json'
         }
         
         response = requests.get(url, params=params, timeout=10)
         response.raise_for_status()
         data = response.json()
         
-        count = data.get('esearchresult', {}).get('count', 0)
-        print(f"  ✓ PubMed accessible ({count} papers on 'aging')")
+        count = data.get('hitCount', 0)
+        print(f"  ✓ Europe PMC accessible ({count} papers on 'aging')")
         return True
         
     except Exception as e:
@@ -133,9 +131,7 @@ def run_test_paper():
         return True
     
     try:
-        # Import the correct submission agent
-        # First, try to import from the file we just created
-        agent_file = Path(__file__).parent / "aging_agent.py"
+        agent_file = Path(__file__).parent / "aging_agent_europepmc.py"
         
         if agent_file.exists():
             print(f"\n✓ Using: {agent_file}")
@@ -145,11 +141,11 @@ def run_test_paper():
             spec.loader.exec_module(module)
             SubmissionAgent = module.SubmissionAgent
         else:
-            # Try importing from src directory
-            from aging_agent_pubmed import SubmissionAgent
+            print(f"  ❌ File not found: {agent_file}")
+            return False
         
         # Create test output directory
-        test_dir = Path("test_submission")
+        test_dir = Path("test_europepmc")
         test_dir.mkdir(exist_ok=True)
         
         # Initialize agent
@@ -159,7 +155,7 @@ def run_test_paper():
         # Run with 1 paper
         print("\n" + "="*80)
         agent.run(
-            initial_query="aging mechanisms[Title/Abstract] AND mitochondria",
+            initial_query="aging",
             target_papers=1,
             max_cost_usd=0.50
         )
@@ -252,7 +248,7 @@ def main():
     """Main setup flow"""
     print("""
 ╔══════════════════════════════════════════════════════════════╗
-║   SETUP & TEST - Submission Format Agent                    ║
+║   SETUP & TEST - Europe PMC Agent                           ║
 ╚══════════════════════════════════════════════════════════════╝
 """)
     
@@ -261,7 +257,7 @@ def main():
         "Requirements": check_requirements(),
         "Environment": check_env_vars(),
         "Anthropic API": test_anthropic_connection(),
-        "PubMed API": test_pubmed_connection(),
+        "Europe PMC API": test_europepmc_connection(),
     }
     
     # Summary
